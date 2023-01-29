@@ -1,0 +1,19 @@
+Sample, = glob_wildcards('{sample}.0')
+rule all:
+    input:
+        expand('{sample}.2',sample=Sample)
+
+rule first:
+    input:
+        expand('{sample}.0',sample=Sample)
+    output:
+        expand('{sample}.1',sample=Sample)
+    shell:
+        'touch {output}'
+rule second:
+    input:
+        expand('{sample}.1',sample=Sample)
+    output:
+        expand('{sample}.2',sample=Sample)
+    shell:
+        'touch {output}'

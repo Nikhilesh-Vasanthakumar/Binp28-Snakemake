@@ -1,0 +1,3 @@
+samples: "config/samples.tsv"
+genome: "Resources/Genome/yeastGenome.fa"
+

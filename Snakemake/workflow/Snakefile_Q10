@@ -1,0 +1,77 @@
+import pandas as pd #Importing pandas library as pd
+import re #Importing Regular Expression
+
+configfile: 'config/config.yaml' #Location of config file.
+
+sample_df = (pd.read_csv(config['samples'],
+ sep='\t',
+ dtype={'sample_name':str, 'fastq':str})
+ .set_index('sample_name', drop=False)) #The reads are stored as a pandas dataframe.
+
+rule all:
+     input:
+        expand('results/01_called_variants/{sample}.vcf',
+                sample=sample_df.sample_name) #The required final outputfile
+
+rule bowtie_index:
+    input:
+        genome=config['genome'] #Assigning the variable genome using the config file.
+    output:
+        multiext(config['genome'], #Multiext to create multiple files with different extensions.
+        ".1.bt2",".2.bt2",".3.bt2",
+        ".4.bt2",".rev.1.bt2",".rev.2.bt2")
+    conda: 'envs/bowtie2.yaml'
+    shell:
+        "bowtie2-build {input.genome} {input.genome} " #Indexing using bowtie2
+
+rule map_reads:
+    input:
+        idx = rules.bowtie_index.output,
+        reads = lambda wildcards: sample_df.loc[wildcards.sample,
+                'fastq'] #Using lambda function to store the sequences in reads
+    output:
+        temp('results/00_mapped_reads/{sample}.unsorted.sam') #Creating a temporary indexed output
+    params:
+        idx = config['genome']
+    conda: 'envs/bowtie2.yaml'
+    shell:
+        'bowtie2 -x {params.idx} '
+        '-U {input.reads} '
+        '-S {output} '
+
+rule sam_to_bam:#Converting the sam input from mapped reads to bam format
+    input:
+        rules.map_reads.output
+    output:
+        'results/00_mapped_reads/{sample}.bam'
+    threads: 2
+    conda: 'envs/htslib.yaml'
+    shell:
+        'samtools sort '
+        '-@ {threads} '
+        '-o {output} {input} '
+
+rule index_bam:#Indexing the mapped bam file
+    input:
+        rules.sam_to_bam.output
+    output:
+        'results/00_mapped_reads/{sample}.bam.bai'
+    conda: 'envs/htslib.yaml'
+    shell:
+        'samtools index {input} '
+
+rule call_variants:#Finally,Variant calling using bcf tools
+    input:
+        rules.index_bam.output,
+        aligned_reads = rules.sam_to_bam.output,
+        genome = config['genome'] #Reference genome
+
+    output:
+        'results/01_called_variants/{sample}.vcf'
+    conda: 'envs/htslib.yaml'
+    shell:
+        'bcftools mpileup -Ou '
+        '-f {input.genome} '
+        '{input.aligned_reads} '
+        '| bcftools call -m -v '
+        '> {output}'
